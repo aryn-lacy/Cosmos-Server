@@ -17,7 +17,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "cosmos-cloud.io/azukaar/cosmos",
+		Address: "tf.lacyhq.name/aryn/cosmos",
 		Debug:   debug,
 	}
 

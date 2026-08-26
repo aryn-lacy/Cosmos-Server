@@ -1,0 +1,47 @@
+name: Release Terraform Provider
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: terraform-provider-cosmos/go.mod
+          cache-dependency-path: terraform-provider-cosmos/go.sum
+
+      - name: Build and package provider
+        working-directory: terraform-provider-cosmos
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ "$VERSION" = "main" ] || [ -z "$VERSION" ] && VERSION="0.0.0-dev"
+          mkdir -p dist
+          targets="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"
+          for target in $targets; do
+            os="${target%/*}"; arch="${target##*/}"
+            ext="$os-$arch"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "dist/terraform-provider-cosmos_${VERSION}_${ext}" .
+            (cd dist && zip "terraform-provider-cosmos_${VERSION}_${ext}.zip" "terraform-provider-cosmos_${VERSION}_${ext}" && rm "terraform-provider-cosmos_${VERSION}_${ext}")
+          done
+          (cd dist && sha256sum *.zip > "terraform-provider-cosmos_${VERSION}_SHA256SUMS")
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          [ "$TAG" = "main" ] || [ -z "$TAG" ] && TAG="0.0.0-dev"
+          gh release create "v${TAG}" --title "Terraform Provider ${TAG}" --generate-notes || true
+          gh release upload "v${TAG}" terraform-provider-cosmos/dist/* --clobber
