@@ -69,8 +69,9 @@ func (r *dockerNetworkResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"subnet": schema.StringAttribute{
-				Description: "The subnet in CIDR format for the network. Changing this forces re-creation.",
+				Description: "The subnet in CIDR format for the network. Changing this forces re-creation. Read from the Docker IPAM config on refresh; omitted from config means 'keep whatever subnet exists'.",
 				Optional:    true,
+				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -224,8 +225,19 @@ func (r *dockerNetworkResource) Read(ctx context.Context, req resource.ReadReque
 		state.Driver = types.StringNull()
 	}
 
-	// Subnet and AttachCosmos are creation-time only and are not returned
-	// by the list endpoint, so we preserve the existing state values.
+	// Parse the subnet from the IPAM config (first entry) when present.
+	// Networks with no explicit subnet (user-defined bridge networks created
+	// without one) legitimately have no IPAM config, in which case subnet
+	// stays unset.
+	if len(found.IPAM.Config) > 0 && found.IPAM.Config[0].Subnet != "" {
+		state.Subnet = types.StringValue(found.IPAM.Config[0].Subnet)
+	}
+
+	// attach_cosmos cannot be read back: the Cosmos API never populates the
+	// Containers map on network objects, so there is no signal for whether
+	// the cosmos-server container is attached. Preserve the existing state
+	// value instead of forcing spurious replacement.
+	_ = state.AttachCosmos
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -262,11 +274,18 @@ func (r *dockerNetworkResource) ImportState(ctx context.Context, req resource.Im
 
 // ---------- helpers ----------
 
-// networkInfo represents the minimal fields returned by the network list API.
+// networkInfo represents the fields returned by the network list API.
 type networkInfo struct {
 	ID     string `json:"Id"`
 	Name   string `json:"Name"`
 	Driver string `json:"Driver"`
+	IPAM   struct {
+		Driver string `json:"Driver"`
+		Config []struct {
+			Subnet  string `json:"Subnet"`
+			Gateway string `json:"Gateway"`
+		} `json:"Config"`
+	} `json:"IPAM"`
 }
 
 // findNetworkIDByName queries the network list and returns the ID for the

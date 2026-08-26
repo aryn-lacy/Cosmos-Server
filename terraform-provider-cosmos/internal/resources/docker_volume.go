@@ -156,13 +156,12 @@ func (r *dockerVolumeResource) Read(ctx context.Context, req resource.ReadReques
 
 	state.Name = types.StringValue(found.Name)
 
-	// Only update driver from API if the user originally set it.
-	// Otherwise leave it as null to avoid spurious replacements
-	// (e.g. API returns "local" but user didn't specify driver).
-	if !state.Driver.IsNull() {
-		if found.Driver != "" {
-			state.Driver = types.StringValue(found.Driver)
-		}
+	// Docker always reports the driver for every volume (e.g. "local"), and
+	// the schema marks driver as Computed with a default of "local". Set it
+	// unconditionally from the API so imported volumes don't carry a null
+	// driver against a non-null plan, which forced perpetual replacement.
+	if found.Driver != "" {
+		state.Driver = types.StringValue(found.Driver)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)

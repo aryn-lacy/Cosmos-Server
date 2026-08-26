@@ -66,6 +66,7 @@ func (r *dockerServiceResource) Schema(_ context.Context, _ resource.SchemaReque
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
+					SemanticServiceJSON(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -305,7 +306,64 @@ func (r *dockerServiceResource) readContainer(ctx context.Context, containerName
 		model.Image = types.StringValue(img)
 	}
 
-	// Don't overwrite service_json — it's a user-provided config input, not
-	// server state. Preserve whatever the user originally set.
+	// service_json is Optional+Computed, but a null state value against a
+	// non-null plan forced replacement on every plan for imported services.
+	// On import (null state) fetch the container's service definition from
+	// the export endpoint, which returns the same schema the configuration
+	// uses. The export is NOT byte-identical to a config's jsonencode()
+	// (it carries Cosmos-managed fields like "routes", explicit null keys,
+	// and Docker's unstable mount order), so we never overwrite a non-null
+	// value: a custom plan modifier (semanticJSONEquals) reconciles the
+	// config-vs-state comparison at plan time instead. Overwriting here
+	// would re-introduce a perpetual replacement loop.
+	if model.ServiceJSON.IsNull() {
+		if exported, ok := r.fetchServiceJSON(ctx, containerName); ok {
+			model.ServiceJSON = types.StringValue(exported)
+		}
+	}
+
 	return true
+}
+
+// fetchServiceJSON retrieves the Cosmos service definition for a container
+// via /api/servapps/{id}/export. Returns ok=false on any failure; callers
+// treat that as "cannot refresh service_json" rather than a hard error.
+func (r *dockerServiceResource) fetchServiceJSON(ctx context.Context, containerName string) (string, bool) {
+	httpResp, err := r.client.Raw.GetApiServappsContainerIdExport(ctx, containerName)
+	if err != nil {
+		return "", false
+	}
+	rawData, err := client.ParseRawResponse(httpResp)
+	if err != nil {
+		return "", false
+	}
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(rawData, &envelope); err != nil || len(envelope.Data) == 0 {
+		return "", false
+	}
+	return string(envelope.Data), true
+}
+
+// jsonSemanticallyEqual reports whether two JSON documents are equivalent
+// once normalized (object key order, insignificant whitespace). Returns
+// false if either document fails to parse.
+func jsonSemanticallyEqual(a, b string) bool {
+	var na, nb interface{}
+	if err := json.Unmarshal([]byte(a), &na); err != nil {
+		return false
+	}
+	if err := json.Unmarshal([]byte(b), &nb); err != nil {
+		return false
+	}
+	normalizedA, err := json.Marshal(na)
+	if err != nil {
+		return false
+	}
+	normalizedB, err := json.Marshal(nb)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(normalizedA, normalizedB)
 }
