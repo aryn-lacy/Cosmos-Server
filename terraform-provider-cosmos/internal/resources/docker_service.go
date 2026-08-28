@@ -337,13 +337,14 @@ func (r *dockerServiceResource) fetchServiceJSON(ctx context.Context, containerN
 	if err != nil {
 		return "", false
 	}
-	var envelope struct {
-		Data json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(rawData, &envelope); err != nil || len(envelope.Data) == 0 {
+	// ParseRawResponse already unwraps the {data: ...} envelope; rawData IS
+	// the service definition. (An earlier version unwrapped a second time,
+	// found no "data" key inside the inner object, and always returned
+	// ok=false, silently breaking the import path for service_json.)
+	if len(rawData) == 0 {
 		return "", false
 	}
-	return string(envelope.Data), true
+	return string(rawData), true
 }
 
 // jsonSemanticallyEqual reports whether two JSON documents are equivalent
