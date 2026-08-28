@@ -318,7 +318,7 @@ func (r *dockerServiceResource) readContainer(ctx context.Context, containerName
 	// would re-introduce a perpetual replacement loop.
 	if model.ServiceJSON.IsNull() {
 		if exported, ok := r.fetchServiceJSON(ctx, containerName); ok {
-			model.ServiceJSON = types.StringValue(exported)
+			model.ServiceJSON = types.StringValue(normalizeServiceJSON(ctx, r.client, exported))
 		}
 	}
 

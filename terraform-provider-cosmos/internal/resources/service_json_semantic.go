@@ -126,10 +126,15 @@ func valueEquivalent(a, b interface{}, key string) bool {
 		if len(at) != len(bt) {
 			return false
 		}
-		if key == "volumes" || key == "ports" {
-			// Docker mount and port-mapping order is not stable across
-			// restarts/inspects (both derive from map iteration): compare
-			// as a multiset.
+		if key == "volumes" {
+			// Docker mount order is not stable across restarts/inspects,
+			// and authored config may use "path:ro" string-suffix form
+			// while exports carry structured mounts with ReadOnly.
+			// Canonicalize both sides, then compare as a multiset.
+			return volumesEqual(at, bt)
+		}
+		if key == "ports" {
+			// Port-mapping order is not stable either (map iteration).
 			return listMultisetEqual(at, bt)
 		}
 		for i := range at {
